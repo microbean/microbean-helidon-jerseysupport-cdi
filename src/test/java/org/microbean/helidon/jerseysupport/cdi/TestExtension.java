@@ -16,8 +16,14 @@
  */
 package org.microbean.helidon.jerseysupport.cdi;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.IOException;
 
+import java.net.URL;
+
+import java.util.Collections;
 import java.util.Set;
 
 import java.util.concurrent.ExecutionException;
@@ -32,9 +38,12 @@ import javax.enterprise.inject.se.SeContainerInitializer;
 
 import javax.enterprise.event.Observes;
 
+import javax.inject.Singleton;
+
 import javax.ws.rs.ApplicationPath;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
 
 import javax.ws.rs.core.Application;
 
@@ -46,6 +55,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 @ApplicationScoped
@@ -66,7 +76,8 @@ public class TestExtension {
   @Before
   public void startCdiContainer() {
     final SeContainerInitializer initializer = SeContainerInitializer.newInstance();
-    assertNotNull(initializer);    
+    assertNotNull(initializer);
+    initializer.addBeanClasses(MyApplication.class);
     this.cdiContainer = initializer.initialize();
   }
 
@@ -79,7 +90,7 @@ public class TestExtension {
 
   @Test
   public void test() {
-
+    // See onStartup()
   }
 
 
@@ -90,21 +101,37 @@ public class TestExtension {
 
   private void onStartup(@Observes @Initialized(ApplicationScoped.class) final Object event,
                          final MyApplication application,
-                         final JerseySupport jerseySupport,
                          WebServer webServer)
     throws ExecutionException, IOException, InterruptedException
   {
     assertNotNull(application);
-    assertNotNull(jerseySupport);
-    webServer.start().thenAccept(ws -> ws.shutdown());
+    webServer.start().toCompletableFuture().get();
+    final URL url = new URL("http://127.0.0.1:" + webServer.port() + "/hello");
+    byte[] result = null;
+    try (final InputStream stream = new BufferedInputStream(url.openStream())) {
+      final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+      assertNotNull(stream);
+      int bytesRead;
+      final byte[] bytes = new byte[4096];
+      while ((bytesRead = stream.read(bytes, 0, bytes.length)) != -1) {
+        buffer.write(bytes, 0, bytesRead);
+      }
+      buffer.flush();
+      result = buffer.toByteArray();
+      buffer.close();
+    }
+    assertNotNull(result);
+    assertEquals("Hello, world!", new String(result, "UTF-8"));
+    webServer.shutdown();
   }
 
 
   /*
    * Inner and nested classes.
    */
+  
 
-  @ApplicationScoped
+  @Singleton
   private static class MyApplication extends Application {
 
     public MyApplication() {
@@ -113,7 +140,24 @@ public class TestExtension {
 
     @Override
     public Set<Class<?>> getClasses() {
-      return null;
+      return Collections.singleton(HelloWorldResource.class);
+    }
+    
+  }
+
+
+  @Path("") // this turns out to be necessary, despite specification section 3.1
+  public static class HelloWorldResource {
+
+    public HelloWorldResource() {
+      super();
+    }
+
+    @Path("hello")
+    @Produces("text/plain")
+    @GET
+    public String sayHello() {
+      return "Hello, world!";
     }
     
   }

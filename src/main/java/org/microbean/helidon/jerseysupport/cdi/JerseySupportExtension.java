@@ -18,12 +18,17 @@ package org.microbean.helidon.jerseysupport.cdi;
 
 import java.lang.annotation.Annotation;
 
+import java.lang.reflect.Type;
+
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import java.util.concurrent.ExecutorService;
 
 import javax.annotation.Priority;
 
+import javax.enterprise.context.ApplicationScoped;
 import javax.enterprise.context.Dependent;
 
 import javax.enterprise.event.Observes;
@@ -31,9 +36,19 @@ import javax.enterprise.event.Observes;
 import javax.enterprise.inject.Any;
 
 import javax.enterprise.inject.spi.AfterBeanDiscovery;
+import javax.enterprise.inject.spi.AnnotatedConstructor;
+import javax.enterprise.inject.spi.AnnotatedParameter;
+import javax.enterprise.inject.spi.configurator.AnnotatedConstructorConfigurator;
+import javax.enterprise.inject.spi.configurator.AnnotatedMethodConfigurator;
+import javax.enterprise.inject.spi.configurator.AnnotatedParameterConfigurator;
+import javax.enterprise.inject.spi.AnnotatedType;
 import javax.enterprise.inject.spi.Bean;
+import javax.enterprise.inject.spi.BeanAttributes;
 import javax.enterprise.inject.spi.BeanManager;
 import javax.enterprise.inject.spi.Extension;
+import javax.enterprise.inject.spi.InjectionTargetFactory;
+
+import javax.enterprise.inject.literal.InjectLiteral;
 
 import javax.interceptor.Interceptor;
 
@@ -70,30 +85,105 @@ public class JerseySupportExtension implements Extension {
           if (applicationBean != null) {
             final Set<Annotation> qualifiers = applicationBean.getQualifiers();
             helidonWebServerExtension.addQualifiers(qualifiers);
-            // TODO: overhaul this a bit so that we can add @Priority (not a qualifier annotation!) to it
-            event.addBean()
-              .scope(Dependent.class) // TODO: I *think* this is right; no need to have it live longer
-              .qualifiers(qualifiers)
-              .addTransitiveTypeClosure(JerseySupport.class)
-              .createWith(cc -> {
-                  final JerseySupport returnValue;
-                  final Set<Bean<?>> executorServiceBeans = beanManager.getBeans(ExecutorService.class, qualifiers.toArray(new Annotation[qualifiers.size()]));
-                  if (executorServiceBeans != null && !executorServiceBeans.isEmpty()) {
-                    final Bean<?> executorServiceBean = beanManager.resolve(executorServiceBeans);
-                    assert executorServiceBean != null;
-                    @SuppressWarnings("unchecked")
-                    final ExecutorService executorService = (ExecutorService)beanManager.getReference(executorServiceBean, ExecutorService.class, cc);
-                    assert executorService != null;
-                    returnValue = JerseySupport.builder((Application)beanManager.getReference(applicationBean, Application.class, cc)).executorService(executorService).build();
-                  } else {
-                    returnValue = JerseySupport.create((Application)beanManager.getReference(applicationBean, Application.class, cc));
-                  }
-                  return returnValue;
-                });
+
+            final AnnotatedType<JerseySupport> jerseySupportAnnotatedType = beanManager.createAnnotatedType(JerseySupport.class);
+            final InjectionTargetFactory<JerseySupport> itf = beanManager.getInjectionTargetFactory(jerseySupportAnnotatedType);
+
+            // Add @Inject to the update() method.
+            final AnnotatedMethodConfigurator<? super JerseySupport> amc = itf.configure()
+              .filterMethods(am -> am.getJavaMember().getName().equals("update"))
+              .findFirst()
+              .get()
+              .add(InjectLiteral.INSTANCE);
+
+            // Add the right qualifiers to the @Inject-annotated
+            // update() method.
+            final AnnotatedParameterConfigurator<? super JerseySupport> rulesParameter = amc.filterParams(ap -> ap != null)
+              .findFirst()
+              .get();
+            for (final Annotation qualifier : qualifiers) {
+              rulesParameter.add(qualifier);
+            }
+
+            // Build the JerseySupport object using its private,
+            // two-argument constructor.  To do this, make sure the
+            // constructor is annotated with @Inject.
+            final AnnotatedConstructorConfigurator<JerseySupport> ac = itf.configure()
+              .filterConstructors(c -> c.getJavaMember().getParameterCount() == 2 && !c.getJavaMember().isSynthetic())
+              .findFirst()
+              .get();
+            ac.add(InjectLiteral.INSTANCE);
+
+            // Make sure that constructor's two parameters are
+            // annotated with the right qualifiers.
+            final List<AnnotatedParameterConfigurator<JerseySupport>> apcs = ac.params();
+            for (final AnnotatedParameterConfigurator<JerseySupport> apc : apcs) {
+              for (final Annotation qualifier : qualifiers) {
+                apc.add(qualifier);
+              }
+            }
+
+            final BeanAttributes<JerseySupport> beanAttributes = beanManager.createBeanAttributes(jerseySupportAnnotatedType);
+            final BeanAttributes<JerseySupport> jerseySupportBeanAttributes = new DelegatingBeanAttributes<JerseySupport>(beanAttributes) {
+                @Override
+                public final Class<? extends Annotation> getScope() {
+                  return ApplicationScoped.class; // TODO: reexamine
+                }
+                
+                @Override
+                public final Set<Annotation> getQualifiers() {
+                  return qualifiers;
+                }
+              };
+
+            final Bean<JerseySupport> jerseySupportBean = beanManager.createBean(jerseySupportBeanAttributes, jerseySupportAnnotatedType.getJavaClass(), itf);
+            event.addBean(jerseySupportBean);
+
           }
         }
       }
     }
+  }
+
+  private static class DelegatingBeanAttributes<T> implements BeanAttributes<T> {
+
+    private final BeanAttributes<T> delegate;
+    
+    private DelegatingBeanAttributes(final BeanAttributes<T> delegate) {
+      super();
+      this.delegate = Objects.requireNonNull(delegate);
+    }
+    
+    @Override
+    public Set<Type> getTypes() {
+      return this.delegate.getTypes();
+    }
+
+    @Override
+    public Set<Annotation> getQualifiers() {
+      return this.delegate.getQualifiers();
+    }
+
+    @Override
+    public Class<? extends Annotation> getScope() {
+      return this.delegate.getScope();
+    }
+
+    @Override
+    public String getName() {
+      return this.delegate.getName();
+    }
+
+    @Override
+    public Set<Class<? extends Annotation>> getStereotypes() {
+      return this.delegate.getStereotypes();
+    }
+
+    @Override
+    public boolean isAlternative() {
+      return this.delegate.isAlternative();
+    }
+
   }
   
 }

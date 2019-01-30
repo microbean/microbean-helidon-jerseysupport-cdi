@@ -78,6 +78,12 @@
         <type>jar</type>
       </dependency>
 
+      <dependency>
+        <groupId>org.glassfish.jersey.ext.cdi</groupId>
+        <artifactId>jersey-weld2-se</artifactId>
+        <version>2.26</version>
+        <type>jar</type>
+      </dependency>
 
     </dependencies>
   </dependencyManagement>
@@ -111,6 +117,13 @@
       <artifactId>woodstox-core</artifactId>
       <scope>runtime</scope>
       <optional>true</optional>
+    </dependency>
+
+    <dependency>
+      <groupId>org.glassfish.jersey.ext.cdi</groupId>
+      <artifactId>jersey-weld2-se</artifactId>
+      <version>2.26</version>
+      <type>jar</type>
     </dependency>
     
     
