@@ -83,6 +83,12 @@
         <artifactId>jersey-weld2-se</artifactId>
         <version>2.26</version>
         <type>jar</type>
+        <exclusions>
+          <exclusion>
+            <groupId>org.glassfish.hk2.external</groupId>
+            <artifactId>javax.inject</artifactId>
+          </exclusion>
+        </exclusions>
       </dependency>
 
     </dependencies>
